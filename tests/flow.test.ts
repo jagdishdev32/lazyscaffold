@@ -3,6 +3,23 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
+describe("config", () => {
+  test("exposes expected defaults", async () => {
+    const { config, getDataFilePath } = await import("../src/config");
+    expect(config.templatesDir).toBe(
+      path.join(os.homedir(), "opt", "scaffold-templates")
+    );
+    expect(config.templatesFolderName).toBe("templates");
+    expect(config.dataFileName).toBe("data.json");
+    expect(config.initialCommitMessage).toBe("Initial setup");
+    expect(config.git.fallbackUserName).toBe("lazyscaffold");
+    expect(config.git.fallbackUserEmail).toBe("lazyscaffold@local");
+    expect(getDataFilePath()).toBe(
+      path.join(os.homedir(), "opt", "scaffold-templates", "data.json")
+    );
+  });
+});
+
 describe("loadTemplates", () => {
   test("loads templates from a data.json file", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "lazyscaffold-"));

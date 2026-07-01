@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { cp, mkdir, readdir, stat } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { config } from "../config";
 import { logError } from "../ui/prompts";
 
 export function resolveTargetPath(target: string): string {
@@ -129,10 +130,12 @@ export async function initGitRepo(
   const hasIdentity =
     Bun.spawnSync(["git", "config", "user.email"], { cwd: dir }).exitCode === 0;
   if (!hasIdentity) {
-    Bun.spawnSync(["git", "config", "user.email", "lazyscaffold@local"], {
+    Bun.spawnSync(["git", "config", "user.email", config.git.fallbackUserEmail], {
       cwd: dir,
     });
-    Bun.spawnSync(["git", "config", "user.name", "lazyscaffold"], { cwd: dir });
+    Bun.spawnSync(["git", "config", "user.name", config.git.fallbackUserName], {
+      cwd: dir,
+    });
   }
 
   const commit = Bun.spawnSync(["git", "commit", "-m", commitMessage, "--no-gpg-sign"], {
