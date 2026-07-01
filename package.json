@@ -1,13 +1,14 @@
 {
   "name": "lazyscaffold",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "module": "src/index.ts",
   "type": "module",
   "bin": {
     "lazyscaffold": "src/index.ts"
   },
   "scripts": {
-    "start": "bun run src/index.ts"
+    "start": "bun run src/index.ts",
+    "link": "bun link"
   },
   "dependencies": {
     "@clack/prompts": "^1.6.0",
