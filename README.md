@@ -6,6 +6,10 @@ A tiny interactive CLI for scaffolding projects from a local template registry. 
 
 Built with [Bun](https://bun.com) and [`@clack/prompts`](https://github.com/natemoo-re/clack).
 
+## Current Working
+
+- [x] Generate project from local templates
+
 ## Quick Setup
 
 - Create a github repository with name `scaffold-templates`
@@ -13,6 +17,10 @@ Built with [Bun](https://bun.com) and [`@clack/prompts`](https://github.com/nate
 ```
 cd ~/opt/
 git clone https://github.com/jagdishdev32/lazyscaffold
+cd lazyscaffold
+bun install && bun link
+
+export PATH="$PATH:$HOME/.bun/bin"
 
 # Initialize Template Folders
 mkdir -p ~/opt/scaffold-templates/templates
@@ -43,7 +51,8 @@ git add -A && git commit -m "initial base"
 git remote add origin {YOUR REPOSITORY URL}
 git push origin main
 
-
+cd ~/Documents
+lazyscaffold
 ```
 
 ## Features
@@ -71,13 +80,29 @@ bun install
 bun run start
 ```
 
-Or invoke the entrypoint directly:
+### Run as `lazyscaffold` from anywhere
+
+Link the project into Bun's global bin so `lazyscaffold` is available on PATH:
 
 ```bash
-bun run src/index.ts
+bun link
 ```
 
-The `package.json` exposes a `lazyscaffold` bin entry pointing at `src/index.ts`.
+Then from any directory:
+
+```bash
+lazyscaffold
+```
+
+If `$HOME/.bun/bin` (Bun's global bin dir) is not on your `PATH`, the command won't be found. Either add it to your shell rc, or create a wrapper in a directory that is on PATH (e.g. `~/bin/lazyscaffold`):
+
+```bash
+cat > ~/bin/lazyscaffold <<'EOF'
+#!/usr/bin/env bash
+exec "$(command -v bun)" $HOME/.bun/install/global/node_modules/lazyscaffold/src/index.ts "$@"
+EOF
+chmod +x ~/bin/lazyscaffold
+```
 
 ## Configuration
 
@@ -139,22 +164,38 @@ bun test
 
 These are planned but **not implemented** — the project is in alpha:
 
-- **`Create template` flow** — currently a no-op stub; will let you define a new template (folder picker, file selection, name, description) and write it back to `data.json`
-- Template variable substitution (e.g. `{{projectName}}`) in template files
-- Optional `git` flags: skip init, custom commit message, branch name
-- `--yes` / non-interactive mode for scripting
-- Template versioning + caching of remote registries
+- create template
+    - [ ] from repository url
+    - [ ] from existing local repository
+    - [ ] create repository with ui like lazygit to interactively select files and lines to add into template
+
+- generate folder from template
+    - [ ] generate from repository url
+    - [ ] generate with custom or no commit
+
+- cli args to generate and create
+    - [ ] generate and create templates from cli args for eg: `lazyscaffold -gen --path "~/Documents/" --name "new-project" nextjs-basic`
+    - [ ] `--yes` / non-interactive mode for scripting
+    - [ ] `--help` for guide
+
+- other options with create and generate 
+    - [ ] update a particular template
+    - [ ] config management option
+
+- Global config
+    - [ ] use `~/.config/lazyscaffold` folder to store lazyscaffold config file details
+    - [ ] edit the configs from lazyscaffold with new option as configs
+    
+
+- update template
+    - [ ] by selecting a particular template it make it go into that particular template folder
+    - [ ] update the template from current folder files (if have updated project and needs to update old template)
+    - [ ] Template versioning + caching of remote registries
+        - [ ] also store the the template version in generated template projects as well to later update projects from template with diff
+
 - Plugin/hook system for post-scaffold steps (`bun install`, framework CLIs, etc.)
 - Dry-run mode and diff preview before writing
 - Search/filter in the template picker
 - Global install via `bun install -g` with a real `bin` shim
 - Cross-platform path handling hardening (Windows, symlinks)
 - TUI polish: keyboard shortcuts, theming, history
-
-## Known Limitations
-
-- No TTY detection — running in a non-interactive shell will hang on the first prompt
-- Path expansion is manual (no `node:path`-style `~user` for other users)
-- `Create template` is a stub; `Generate from template` is the only working flow
-- Templates are read on every run; no caching
-- No remote registry support — templates must live on disk
