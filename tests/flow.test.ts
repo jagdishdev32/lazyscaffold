@@ -107,6 +107,22 @@ describe("resolveTargetPath", () => {
   });
 });
 
+describe("validatePath / validateFolderName", () => {
+  test("validatePath accepts undefined and empty without throwing", async () => {
+    const { validatePath } = await import("../src/utils/fs");
+    expect(validatePath(undefined)).toBeUndefined();
+    expect(validatePath("")).toBeUndefined();
+    expect(validatePath(".")).toBeUndefined();
+    expect(validatePath("/tmp")).toBeUndefined();
+  });
+
+  test("validateFolderName rejects undefined and empty", async () => {
+    const { validateFolderName } = await import("../src/utils/fs");
+    expect(validateFolderName(undefined)).toBe("Folder name cannot be empty.");
+    expect(validateFolderName("")).toBe("Folder name cannot be empty.");
+  });
+});
+
 describe("initGitRepo", () => {
   let work: string;
   beforeEach(async () => {
@@ -185,5 +201,208 @@ describe("lazyscaffold flows (mocked I/O)", () => {
     const { runGenerateTemplate } = await import("../src/commands/generate");
     await runGenerateTemplate();
     expect(selectMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("template placeholders", () => {
+  test("extractPlaceholders finds unique placeholders", async () => {
+    const { extractPlaceholders } = await import("../src/utils/template-placeholders");
+    const found = extractPlaceholders("hello {{name}}, code: {{name}}, repo: {{githubURL}}");
+    expect(found.sort()).toEqual(["githubURL", "name"]);
+  });
+
+  test("substituteContent replaces non-empty values and preserves empty placeholders", async () => {
+    const { substituteContent } = await import("../src/utils/template-placeholders");
+    const { content, replaced } = substituteContent(
+      "Hi {{name}} ({{githubURL}}).",
+      { name: "alice", githubURL: "" }
+    );
+    expect(content).toBe("Hi alice ({{githubURL}}).");
+    expect(replaced).toBe(1);
+  });
+
+  test("substituteContent leaves unknown placeholders intact", async () => {
+    const { substituteContent } = await import("../src/utils/template-placeholders");
+    const { content, replaced } = substituteContent(
+      "x {{a}} y {{b}}",
+      { a: "1" }
+    );
+    expect(content).toBe("x 1 y {{b}}");
+    expect(replaced).toBe(1);
+  });
+});
+
+describe("template-files isTextFile", () => {
+  test("matches allowlisted extensions and bare filenames", async () => {
+    const { isTextFile } = await import("../src/utils/template-files");
+    expect(isTextFile("a.md")).toBe(true);
+    expect(isTextFile("a.json")).toBe(true);
+    expect(isTextFile("Dockerfile")).toBe(true);
+    expect(isTextFile("Makefile")).toBe(true);
+  });
+
+  test("does not treat binary extensions as text", async () => {
+    const { isTextFile } = await import("../src/utils/template-files");
+    expect(isTextFile("logo.png")).toBe(false);
+    expect(isTextFile("font.woff2")).toBe(false);
+    expect(isTextFile("package-lock.json")).toBe(false);
+  });
+});
+
+describe("copyTemplate with substitution", () => {
+  let work: string;
+  beforeEach(async () => {
+    work = await fs.mkdtemp(path.join(os.tmpdir(), "lazyscaffold-subst-"));
+  });
+  afterEach(async () => {
+    await fs.rm(work, { recursive: true, force: true });
+  });
+
+  test("replaces placeholders in text files and renames files", async () => {
+    const src = path.join(work, "src");
+    const dst = path.join(work, "dst");
+    await fs.mkdir(path.join(src, "{{projectName}}"), { recursive: true });
+    await fs.writeFile(
+      path.join(src, "README.md"),
+      "# {{projectNameTitle}} ({{projectName}})\nrepo: {{githubURL}}\n"
+    );
+    await fs.writeFile(
+      path.join(src, "{{projectName}}", "index.ts"),
+      "export const slug = '{{projectName}}';"
+    );
+
+    const { copyTemplate } = await import("../src/utils/fs");
+    const result = await copyTemplate(src, dst, {
+      projectName: "my-app",
+      projectNameTitle: "My App",
+      githubURL: "https://github.com/me/my-app",
+    });
+    expect(result.files).toBe(2);
+    expect(result.substituted).toBe(2);
+
+    expect(await Bun.file(path.join(dst, "README.md")).text()).toBe(
+      "# My App (my-app)\nrepo: https://github.com/me/my-app\n"
+    );
+    expect(await Bun.file(path.join(dst, "my-app", "index.ts")).text()).toBe(
+      "export const slug = 'my-app';"
+    );
+  });
+
+  test("preserves {{name}} literal when value is empty", async () => {
+    const src = path.join(work, "src");
+    const dst = path.join(work, "dst");
+    await fs.mkdir(src, { recursive: true });
+    await fs.writeFile(
+      path.join(src, "config.json"),
+      JSON.stringify({ name: "{{projectName}}", url: "{{githubURL}}" })
+    );
+
+    const { copyTemplate } = await import("../src/utils/fs");
+    await copyTemplate(src, dst, { projectName: "kept", githubURL: "" });
+    const out = JSON.parse(
+      await Bun.file(path.join(dst, "config.json")).text()
+    );
+    expect(out.name).toBe("kept");
+    expect(out.url).toBe("{{githubURL}}");
+  });
+
+  test("leaves binary files untouched when substitution is requested", async () => {
+    const src = path.join(work, "src");
+    const dst = path.join(work, "dst");
+    await fs.mkdir(src, { recursive: true });
+    const binary = Buffer.from([0xff, 0x00, 0xfe, 0x01, 0x80]);
+    await fs.writeFile(path.join(src, "logo.png"), binary);
+
+    const { copyTemplate } = await import("../src/utils/fs");
+    const result = await copyTemplate(src, dst, { projectName: "x" });
+    expect(result.files).toBe(1);
+    expect(result.substituted).toBe(0);
+    const out = await Bun.file(path.join(dst, "logo.png")).arrayBuffer();
+    expect(Buffer.from(out).equals(binary)).toBe(true);
+  });
+
+  test("no values passed behaves as before (no substitution, no errors)", async () => {
+    const src = path.join(work, "src");
+    const dst = path.join(work, "dst");
+    await fs.mkdir(src, { recursive: true });
+    await fs.writeFile(
+      path.join(src, "a.md"),
+      "literal {{name}} preserved"
+    );
+
+    const { copyTemplate } = await import("../src/utils/fs");
+    const result = await copyTemplate(src, dst);
+    expect(result.files).toBe(1);
+    expect(result.substituted).toBe(0);
+    expect(await Bun.file(path.join(dst, "a.md")).text()).toBe(
+      "literal {{name}} preserved"
+    );
+  });
+});
+
+describe("loadTemplates with variables", () => {
+  let work: string;
+  beforeEach(async () => {
+    work = await fs.mkdtemp(path.join(os.tmpdir(), "lazyscaffold-tplvars-"));
+  });
+  afterEach(async () => {
+    await fs.rm(work, { recursive: true, force: true });
+  });
+
+  test("auto-discovers placeholders from files when none declared", async () => {
+    const tmplDir = path.join(work, "templates", "backend");
+    await fs.mkdir(tmplDir, { recursive: true });
+    await fs.writeFile(
+      path.join(tmplDir, "README.md"),
+      "# {{projectNameTitle}} ({{projectName}})"
+    );
+    await fs.writeFile(
+      path.join(tmplDir, "package.json"),
+      JSON.stringify({ name: "{{projectName}}", repo: "{{githubURL}}" })
+    );
+    await fs.writeFile(
+      path.join(work, "data.json"),
+      JSON.stringify({
+        templates: [
+          { name: "Backend", description: "x", path: "templates/backend" },
+        ],
+      })
+    );
+
+    const { loadTemplates } = await import("../src/templates");
+    const tpls = await loadTemplates(path.join(work, "data.json"));
+    expect(tpls).toHaveLength(1);
+    const names = tpls[0].variables.map((v) => v.name).sort();
+    expect(names).toEqual(["githubURL", "projectName", "projectNameTitle"]);
+  });
+
+  test("declared variables keep descriptions; auto-discovered appended", async () => {
+    const tmplDir = path.join(work, "templates", "backend");
+    await fs.mkdir(tmplDir, { recursive: true });
+    await fs.writeFile(path.join(tmplDir, "a.md"), "x {{projectName}} {{githubURL}}");
+    await fs.writeFile(
+      path.join(work, "data.json"),
+      JSON.stringify({
+        templates: [
+          {
+            name: "Backend",
+            description: "x",
+            path: "templates/backend",
+            variables: [
+              { name: "projectName", description: "Slug" },
+              { name: "projectNameTitle", description: "Title" },
+            ],
+          },
+        ],
+      })
+    );
+
+    const { loadTemplates } = await import("../src/templates");
+    const tpls = await loadTemplates(path.join(work, "data.json"));
+    expect(tpls[0].variables).toEqual([
+      { name: "projectName", description: "Slug" },
+      { name: "projectNameTitle", description: "Title" },
+      { name: "githubURL" },
+    ]);
   });
 });

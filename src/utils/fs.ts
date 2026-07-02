@@ -1,9 +1,11 @@
 import { existsSync } from "node:fs";
-import { cp, mkdir, readdir, stat } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { config } from "../config";
 import { logError } from "../ui/prompts";
+import { applyFilenameSubstitution, isTextFile } from "./template-files";
+import { substituteContent } from "./template-placeholders";
 
 export function resolveTargetPath(target: string): string {
   const expanded = expandHome(target.trim());
@@ -19,8 +21,8 @@ function expandHome(p: string): string {
   return p;
 }
 
-export function validateFolderName(name: string): string | undefined {
-  const trimmed = name.trim();
+export function validateFolderName(name: string | undefined): string | undefined {
+  const trimmed = (name ?? "").trim();
   if (!trimmed) return "Folder name cannot be empty.";
   if (trimmed === "." || trimmed === "..") return "Folder name cannot be '.' or '..'.";
   if (/[<>:"|?*\x00-\x1F]/.test(trimmed)) {
@@ -29,9 +31,7 @@ export function validateFolderName(name: string): string | undefined {
   return undefined;
 }
 
-export function validatePath(p: string): string | undefined {
-  const trimmed = p.trim();
-  if (!trimmed) return "Path cannot be empty.";
+export function validatePath(p: string | undefined): string | undefined {
   return undefined;
 }
 
@@ -45,24 +45,47 @@ export async function ensureDirectory(p: string): Promise<void> {
 
 export async function copyTemplate(
   sourceDir: string,
-  destDir: string
-): Promise<{ files: number }> {
+  destDir: string,
+  values: Record<string, string> = {}
+): Promise<{ files: number; substituted: number }> {
   if (!existsSync(sourceDir)) {
     throw new Error(`Template source not found: ${sourceDir}`);
   }
   await ensureDirectory(destDir);
 
   let count = 0;
+  let substituted = 0;
+  async function copyText(src: string, dest: string): Promise<void> {
+    const raw = await readFile(src);
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(raw);
+    const { content, replaced } = substituteContent(text, values);
+    if (replaced > 0) {
+      await writeFile(dest, content, { encoding: "utf8" });
+      substituted++;
+    } else {
+      await cp(src, dest);
+    }
+  }
+
   async function walk(src: string, dest: string): Promise<void> {
     const entries = await readdir(src, { withFileTypes: true });
     for (const entry of entries) {
       const s = path.join(src, entry.name);
-      const d = path.join(dest, entry.name);
+      const newName = applyFilenameSubstitution(entry.name, values);
+      const d = path.join(dest, newName);
       if (entry.isDirectory()) {
         await ensureDirectory(d);
         await walk(s, d);
       } else if (entry.isFile()) {
-        await cp(s, d);
+        if (Object.keys(values).length > 0 && isTextFile(s)) {
+          try {
+            await copyText(s, d);
+          } catch {
+            await cp(s, d);
+          }
+        } else {
+          await cp(s, d);
+        }
         count++;
       } else if (entry.isSymbolicLink()) {
         const target = await stat(s).catch(() => null);
@@ -80,7 +103,7 @@ export async function copyTemplate(
     logError(`Copy failed: ${(err as Error).message}`);
     throw err;
   }
-  return { files: count };
+  return { files: count, substituted };
 }
 
 export type GitInitResult = {

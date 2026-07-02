@@ -43,7 +43,7 @@ export async function runGenerateTemplate(): Promise<void> {
 
     const tpl = templates.find((t) => t.id === selected);
     if (!tpl) {
-      logError(`Template not found: ${selected}`);
+      logError(`Template not found: ${selected?.toString()}`);
       continue;
     }
 
@@ -55,17 +55,18 @@ export async function runGenerateTemplate(): Promise<void> {
       validate: validateFolderName,
     });
     if (isCancel(folderName)) cancel("Generation cancelled.");
-    const name = (folderName as string).trim();
+    const name = String(folderName ?? "").trim();
 
-    const targetPath = await textInput({
+    const targetPathRaw = await textInput({
       message: "Target path:",
       placeholder: "Current directory",
       defaultValue: ".",
       validate: validatePath,
     });
-    if (isCancel(targetPath)) cancel("Generation cancelled.");
+    if (isCancel(targetPathRaw)) cancel("Generation cancelled.");
+    const targetPath = String(targetPathRaw ?? "").trim() || ".";
 
-    const fullPath = path.join(resolveTargetPath(targetPath as string), name);
+    const fullPath = path.join(resolveTargetPath(targetPath), name);
 
     if (pathExists(fullPath)) {
       logWarn(`Folder already exists at ${fullPath}.`);
@@ -77,12 +78,27 @@ export async function runGenerateTemplate(): Promise<void> {
       }
     }
 
+    const values: Record<string, string> = {};
+    for (const v of tpl.variables) {
+      const answer = await textInput({
+        message: `${v.name}:`,
+        placeholder: `{{${v.name}}}`,
+      });
+      if (isCancel(answer)) cancel("Generation cancelled.");
+      values[v.name] = String(answer).trim();
+    }
+
     const s = p.spinner();
     s.start(`Scaffolding ${tpl.name} into ${fullPath}`);
     try {
       await ensureDirectory(fullPath);
-      const { files } = await copyTemplate(tpl.path, fullPath);
-      s.stop(`${files} file(s) copied`);
+      const { files, substituted } = await copyTemplate(
+        tpl.path,
+        fullPath,
+        values,
+      );
+      const tag = substituted > 0 ? ` (${substituted} substituted)` : "";
+      s.stop(`${files} file(s) copied${tag}`);
     } catch (err) {
       s.stop("Failed");
       logError((err as Error).message);
